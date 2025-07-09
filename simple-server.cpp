@@ -1,108 +1,38 @@
-#include <iostream>  
-#include <string>    
-#include <cstring>   
-#include <algorithm> 
-#include <sys/socket.h>  
-#include <netinet/in.h>  
-#include <unistd.h>      
-
-#include <pqxx/pqxx>     
-
-const int PORT = номер порта; //сюда вписать номер порта
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <array>
 
 int main() {
 
-    std::string conn_str = "host=localhost port=5432 dbname=название таблицы user=название password=пароль"; //сюда вписываем имя пользователя и пароль а так же название таблицы
-    pqxx::connection C(conn_str); 
+    std::string schedulerFilePath = "адрес исполняемого файла планировщика, по сути адрес scheduler на компьютере"; // сюда вписать адрес
+    std::array<std::string, 10> arguments = {
+        "1",   // argv[1] - уведомлять или нет
+        "1",   // argv[2] - частота уведомления
+        "111111111111", // argv[3] - id задачи
+        "1",   // argv[4] - режим задачи (установить)
+        "4",   // argv[5] - месяц начала
+        "*",  // argv[6] - день начала
+        "02",   // argv[7] - час начала
+        "4",   // argv[8] - месяц конца
+        "08",  // argv[9] - день конца
+        "01"   // argv[10] - час конца
+    };
 
-    if (!C.is_open()) {
-        std::cerr << "ОШИБКА: Не удалось подключиться к базе данных." << std::endl;
-        return 1; 
-    }
-    std::cout << "Успешно подключено к базе данных: " << C.dbname() << std::endl;
-
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        std::cerr << "Ошибка: Не удалось создать сокет" << std::endl;
-        return 1;
-    }
-
-    
-    int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        std::cerr << "Ошибка: setsockopt" << std::endl;
-        close(server_fd); 
-        return 1;
+    std::string command = "\"" + schedulerFilePath + "\"";
+    for (const std::string& arg : arguments) {
+        command += " \"" + arg + "\"";
     }
 
-    sockaddr_in address; 
-    std::memset(&address, 0, sizeof(address)); 
-    address.sin_family = AF_INET;           
-    address.sin_addr.s_addr = INADDR_ANY;   
-                                            
-    address.sin_port = htons(PORT);         
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        std::cerr << "Ошибка: Не удалось привязать сокет к порту " << PORT << std::endl;
-        close(server_fd); 
-        return 1;
+    std::cout << "Выполняемая команда: " << command << std::endl;
+
+    int result = system(command.c_str());
+
+    if (result == 0) {
+        std::cout << "scheduler.cpp успешно вызван." << std::endl;
+    } else {
+        std::cerr << "Ошибка при вызове scheduler.cpp. Код возврата: " << result << std::endl;
     }
 
-    if (listen(server_fd, 5) < 0) {
-        std::cerr << "Ошибка: Не удалось начать прослушивание" << std::endl;
-        close(server_fd); 
-        return 1;
-    }
-
-    std::cout << "Сервер C++ запущен и слушает на порту " << PORT << std::endl;
-    std::cout << "Ожидаю входящие соединения от Arduino..." << std::endl;
-
-    while (true) {
-        socklen_t addrlen = sizeof(address);
-
-        int new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
-        if (new_socket < 0) {
-            std::cerr << "Ошибка: Не удалось принять соединение" << std::endl;
-            continue;
-        }
-
-        std::cout << "\nПолучено новое соединение!" << std::endl;
-
-
-        char buffer[1024] = {0}; 
-        int bytes_read = read(new_socket, buffer, 1024);
-        
-        if (bytes_read > 0) {
-            std::string received_message(buffer, bytes_read);
-
-            received_message.erase(std::remove(received_message.begin(), received_message.end(), '\n'), received_message.end());
-            received_message.erase(std::remove(received_message.begin(), received_message.end(), '\r'), received_message.end());
-            
-            std::cout << "Получено сообщение:\n--- НАЧАЛО СООБЩЕНИЯ ---\n" << received_message << "\n--- КОНЕЦ СООБЩЕНИЯ ---\n" << std::endl;
-
-
-            int button_code_to_insert = 1; 
-
-            pqxx::work W(C);
-
-            std::string sql_insert = "INSERT INTO button_signals (button_code) VALUES (" +
-                                     W.quote(button_code_to_insert) + ");";
-
-            W.exec(sql_insert);
-
-            W.commit();
-
-            std::cout << "Запись с button_code=" << button_code_to_insert << " успешно добавлена в таблицу 'button_signals'." << std::endl;
-
-        } else if (bytes_read == 0) {
-            std::cout << "Соединение закрыто клиентом." << std::endl;
-        } else {
-            std::cerr << "Ошибка чтения из сокета." << std::endl;
-        }
-
-        close(new_socket);
-    }
-
-   	close(server_fd); 
-    
-    return 0; 
+    return 0;
 }
